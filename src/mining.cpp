@@ -91,7 +91,7 @@ bool checkPoolConnection(void) {
   }
 
   //Try connecting pool IP
-  if (!client.connect(serverIP, Settings.PoolPort)) {
+  if (!client.connect(serverIP, Settings.PoolPort, 10000)) {
     Serial.println("Imposible to connect to : " + Settings.PoolAddress);
     WiFi.hostByName(Settings.PoolAddress.c_str(), serverIP);
     Serial.printf("Resolved DNS got: %s\n", serverIP.toString());
