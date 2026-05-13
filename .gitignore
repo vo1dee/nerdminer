@@ -5,8 +5,12 @@
 *.sln
 *.vcxproj*
 NerdMinerLog.txt
-bin/0x10000_firmware.bin
+bin/
+*.bin
+firmware/
 logs
 boards/ESP32_wroom_guide.md
 
 src/userConfig.h
+compile_commands.json
+data/
