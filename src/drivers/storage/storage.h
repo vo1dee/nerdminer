@@ -4,6 +4,9 @@
 #include <Arduino.h>
 
 // config files
+#if __has_include("../../userConfig.h")
+#include "../../userConfig.h"
+#endif
 
 // default settings
 #ifndef HAN
@@ -14,7 +17,11 @@
 #define DEFAULT_WIFIPW		"MineYourCoins"
 #define DEFAULT_POOLURL		"public-pool.io"
 #define DEFAULT_POOLPASS	"x"
+#ifdef BTC_WALLET
+#define DEFAULT_WALLETID	BTC_WALLET
+#else
 #define DEFAULT_WALLETID	"yourBtcAddress"
+#endif
 #define DEFAULT_POOLPORT	21496
 #define DEFAULT_TIMEZONE	2
 #define DEFAULT_SAVESTATS	false
