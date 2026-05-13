@@ -14,6 +14,7 @@
 #include "drivers/storage/nvMemory.h"
 #include "drivers/storage/storage.h"
 #include "mining.h"
+#include "userConfig.h"
 #include "timeconst.h"
 
 #include <ArduinoJson.h>
@@ -301,7 +302,6 @@ void init_WifiManager()
         wm.setCaptivePortalEnable(true); 
         wm.setConfigPortalBlocking(true);
         wm.setEnableConfigPortal(true);
-        // if (!wm.autoConnect(Settings.WifiSSID.c_str(), Settings.WifiPW.c_str()))
         if (!wm.autoConnect(apName, DEFAULT_WIFIPW))
         {
             Serial.println("Failed to connect to configured WIFI, and hit timeout");

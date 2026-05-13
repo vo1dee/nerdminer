@@ -2,14 +2,24 @@
 
 #ifdef T_DISPLAY
 
+
+#include "media/NotoSansCyrillic.h"
 #include <TFT_eSPI.h>
 #include "media/images_320_170.h"
 #include "media/myFonts.h"
 #include "media/Free_Fonts.h"
 #include "version.h"
 #include "monitor.h"
+#include "userConfig.h"
+#include <WiFi.h>
+#include "HTTPClient.h"
 #include "OpenFontRender.h"
 #include "rotation.h"
+
+static char alertStatus = 'N';
+static unsigned long mAlertUpdate = 0;
+static bool cyrillicLoaded = false;
+
 
 #define WIDTH 340
 #define HEIGHT 170
@@ -17,6 +27,7 @@
 OpenFontRender render;
 TFT_eSPI tft = TFT_eSPI();                  // Invoke library, pins defined in User_Setup.h
 TFT_eSprite background = TFT_eSprite(&tft); // Invoke library sprite
+
 
 void tDisplay_Init(void)
 {
@@ -61,6 +72,7 @@ void tDisplay_AlternateRotation(void)
 
 void tDisplay_MinerScreen(unsigned long mElapsed)
 {
+  render.loadFont(DigitalNumbers, sizeof(DigitalNumbers));
   mining_data data = getMiningData(mElapsed);
 
   // Print background screen
@@ -111,6 +123,7 @@ void tDisplay_MinerScreen(unsigned long mElapsed)
 
 void tDisplay_ClockScreen(unsigned long mElapsed)
 {
+  render.loadFont(DigitalNumbers, sizeof(DigitalNumbers));
   clock_data data = getClockData(mElapsed);
 
   // Print background screen
@@ -149,6 +162,7 @@ void tDisplay_ClockScreen(unsigned long mElapsed)
 
 void tDisplay_GlobalHashScreen(unsigned long mElapsed)
 {
+  render.loadFont(DigitalNumbers, sizeof(DigitalNumbers));
   coin_data data = getCoinData(mElapsed);
 
   // Print background screen
@@ -209,6 +223,7 @@ void tDisplay_GlobalHashScreen(unsigned long mElapsed)
 
 void tDisplay_BTCprice(unsigned long mElapsed)
 {
+  render.loadFont(DigitalNumbers, sizeof(DigitalNumbers));
   clock_data data = getClockData(mElapsed);
   data.currentDate ="01/12/2023";
   
@@ -270,7 +285,83 @@ void tDisplay_DoLedStuff(unsigned long frame)
 {
 }
 
-CyclicScreenFunction tDisplayCyclicScreens[] = {tDisplay_MinerScreen, tDisplay_ClockScreen, tDisplay_GlobalHashScreen, tDisplay_BTCprice};
+// ===== AIR RAID ALERT SCREEN =====
+#define ALERT_BASE_URL "https://api.alerts.in.ua/v1/iot/active_air_raid_alerts/25.json?token="
+#define UPDATE_ALERT_ms 30000
+
+
+
+void fetchAlertStatus(void) {
+  if ((mAlertUpdate == 0) || (millis() - mAlertUpdate > UPDATE_ALERT_ms)) {
+    if (WiFi.status() != WL_CONNECTED) return;
+    HTTPClient http;
+    http.setTimeout(8000);
+    try {
+      String alertUrl = String(ALERT_BASE_URL) + String(ALERT_API_TOKEN);
+      http.begin(alertUrl);
+      int httpCode = http.GET();
+      if (httpCode == HTTP_CODE_OK) {
+        String payload = http.getString();
+        payload.trim();
+        for (int i = 0; i < payload.length(); i++) {
+          if (payload[i] == 'A' || payload[i] == 'P' || payload[i] == 'N') {
+            alertStatus = payload[i];
+            break;
+          }
+        }
+        mAlertUpdate = millis();
+      }
+      http.end();
+    } catch(...) {
+      Serial.println("Alert HTTP error");
+      http.end();
+    }
+  }
+}
+
+void tDisplay_AlertScreen(unsigned long mElapsed) {
+  fetchAlertStatus();
+
+  uint32_t bgColor = TFT_GREEN;
+  const char* statusText = "ЧИСТО";
+  const char* statusUA = "Немає тривоги";
+  if (alertStatus == 'A') {
+    bgColor = TFT_RED;
+    statusText = "ТРИВОГА";
+    statusUA = "Повітряна тривога";
+  } else if (alertStatus == 'P') {
+    bgColor = TFT_ORANGE;
+    statusText = "ЧАСТКОВО";
+    statusUA = "Часткова тривога";
+  }
+
+  background.fillSprite(bgColor);
+
+  // Top info bar
+  background.fillRect(0, 0, WIDTH, 22, 0x1082);
+  background.setTextDatum(TL_DATUM);
+  background.setTextColor(TFT_WHITE, 0x1082);
+  background.setFreeFont(FSS9);
+  background.drawString("Чернігівська обл.", 8, 4, GFXFF);
+  clock_data cd = getClockData(mElapsed);
+  background.setTextDatum(TR_DATUM);
+  background.drawString(cd.currentTime.c_str(), WIDTH - 8, 4, GFXFF);
+
+  if (!cyrillicLoaded) {
+    render.loadFont(NotoSansCyrillic, sizeof(NotoSansCyrillic));
+    cyrillicLoaded = true;
+  }
+
+  render.setFontSize(58);
+  render.drawString(statusText, 20, 30, TFT_WHITE);
+
+  render.setFontSize(20);
+  render.drawString(statusUA, 20, 128, TFT_WHITE);
+
+  background.pushSprite(0, 0);
+}
+
+CyclicScreenFunction tDisplayCyclicScreens[] = {tDisplay_MinerScreen, tDisplay_AlertScreen, tDisplay_ClockScreen, tDisplay_GlobalHashScreen, tDisplay_BTCprice};
 
 DisplayDriver tDisplayDriver = {
     tDisplay_Init,
