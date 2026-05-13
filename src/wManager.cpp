@@ -168,7 +168,7 @@ void init_WifiManager()
         if (SDCrd.loadConfigFile(&Settings))
         {
             //Config file on SD card.
-            SDCrd.SD2nvMemory(&nvMem, &Settings); // reboot on success.          
+            SDCrd.SD2nvMemory(&nvMem, &Settings); // reboot on success.
         }
         else
         {
@@ -176,8 +176,20 @@ void init_WifiManager()
             forceConfig = true;
         }
     };
-    
-    // Free the memory from SDCard class 
+
+    // Apply hardcoded overrides from userConfig.h (if defined)
+#ifdef BTC_WALLET
+    strncpy(Settings.BtcWallet, BTC_WALLET, sizeof(Settings.BtcWallet) - 1);
+    Settings.BtcWallet[sizeof(Settings.BtcWallet) - 1] = '\0';
+#endif
+#ifdef POOL_URL
+    Settings.PoolAddress = POOL_URL;
+#endif
+#ifdef POOL_PORT
+    Settings.PoolPort = POOL_PORT;
+#endif
+
+    // Free the memory from SDCard class
     SDCrd.terminate();
     
     // Reset settings (only for development)
