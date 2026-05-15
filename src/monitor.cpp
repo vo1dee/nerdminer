@@ -405,6 +405,11 @@ coin_data getCoinData(unsigned long mElapsed)
   return data;
 }
 
+unsigned long getCurrentEpochSeconds(void) {
+    unsigned long elapsedTime = (millis() - mTriggerUpdate) / 1000;
+    return initialTime + elapsedTime;
+}
+
 String getPoolAPIUrl(void) {
     poolAPIUrl = String(getPublicPool);
     if (Settings.PoolAddress == "public-pool.io") {

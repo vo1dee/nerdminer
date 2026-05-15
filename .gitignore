@@ -14,3 +14,4 @@ boards/ESP32_wroom_guide.md
 src/userConfig.h
 compile_commands.json
 data/
+start_relay.bat

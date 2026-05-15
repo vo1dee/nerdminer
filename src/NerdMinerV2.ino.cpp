@@ -15,6 +15,7 @@
 #include "drivers/storage/SDCard.h"
 #include "ShaTests/nerdSHA_HWTest.h"
 #include "timeconst.h"
+#include "claude_usage.h"
 
 #ifdef TOUCH_ENABLE
 #include "TouchHandler.h"
@@ -187,6 +188,9 @@ void setup()
 
   /******** MONITOR SETUP *****/
   setup_monitor();
+
+  /******** START CLAUDE USAGE FETCH TASK *****/
+  startClaudeUsageTask();
 }
 
 void app_error_fault_handler(void *arg) {

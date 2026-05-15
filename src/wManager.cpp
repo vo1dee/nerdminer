@@ -188,7 +188,6 @@ void init_WifiManager()
 #ifdef POOL_PORT
     Settings.PoolPort = POOL_PORT;
 #endif
-
     // Free the memory from SDCard class
     SDCrd.terminate();
     
@@ -379,7 +378,7 @@ void init_WifiManager()
         #if defined(ESP32_2432S028R) || defined(ESP32_2432S028_2USB)
         Settings.invertColors = (strncmp(invertColors.getValue(), "T", 1) == 0);
         Serial.print("Invert Colors: ");
-        Serial.println(Settings.invertColors);        
+        Serial.println(Settings.invertColors);
         #endif
 
         #if defined(ESP32_2432S028R) || defined(ESP32_2432S028_2USB)

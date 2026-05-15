@@ -15,11 +15,10 @@
 #include "HTTPClient.h"
 #include "OpenFontRender.h"
 #include "rotation.h"
+#include "claude_usage.h"
 
-static char alertStatus = 'N';
-static unsigned long mAlertUpdate = 0;
-static bool cyrillicLoaded = false;
-
+static volatile char alertStatus = 'N';
+static void alertTask(void* pvParameters);
 
 #define WIDTH 340
 #define HEIGHT 170
@@ -56,6 +55,8 @@ void tDisplay_Init(void)
     Serial.println("Initialise error");
     return;
   }
+
+  xTaskCreate(alertTask, "AlertFetch", 6144, NULL, 1, NULL);
 }
 
 void tDisplay_AlternateScreenState(void)
@@ -289,38 +290,31 @@ void tDisplay_DoLedStuff(unsigned long frame)
 #define ALERT_BASE_URL "https://api.alerts.in.ua/v1/iot/active_air_raid_alerts/25.json?token="
 #define UPDATE_ALERT_ms 30000
 
-
-
-void fetchAlertStatus(void) {
-  if ((mAlertUpdate == 0) || (millis() - mAlertUpdate > UPDATE_ALERT_ms)) {
-    if (WiFi.status() != WL_CONNECTED) return;
-    HTTPClient http;
-    http.setTimeout(8000);
-    try {
-      String alertUrl = String(ALERT_BASE_URL) + String(ALERT_API_TOKEN);
-      http.begin(alertUrl);
-      int httpCode = http.GET();
-      if (httpCode == HTTP_CODE_OK) {
-        String payload = http.getString();
-        payload.trim();
-        for (int i = 0; i < payload.length(); i++) {
-          if (payload[i] == 'A' || payload[i] == 'P' || payload[i] == 'N') {
-            alertStatus = payload[i];
-            break;
+static void alertTask(void* pvParameters) {
+  vTaskDelay(20000 / portTICK_PERIOD_MS);
+  for (;;) {
+    if (WiFi.status() == WL_CONNECTED) {
+      HTTPClient http;
+      http.setTimeout(8000);
+      if (http.begin("http://192.168.88.20:8765/alert")) {
+        int code = http.GET();
+        if (code == 200) {
+          String s = http.getString();
+          s.trim();
+          if (s.length() > 0 && (s[0] == 'A' || s[0] == 'P' || s[0] == 'N')) {
+            alertStatus = s[0];
           }
         }
-        mAlertUpdate = millis();
+        Serial.printf("Alert HTTP: %d  status: %c\n", code, (char)alertStatus);
+        http.end();
       }
-      http.end();
-    } catch(...) {
-      Serial.println("Alert HTTP error");
-      http.end();
     }
+    vTaskDelay(UPDATE_ALERT_ms / portTICK_PERIOD_MS);
   }
 }
 
 void tDisplay_AlertScreen(unsigned long mElapsed) {
-  fetchAlertStatus();
+  (void)mElapsed;
 
   uint32_t bgColor = TFT_GREEN;
   const char* statusText = "ЧИСТО";
@@ -337,20 +331,20 @@ void tDisplay_AlertScreen(unsigned long mElapsed) {
 
   background.fillSprite(bgColor);
 
-  // Top info bar
-  background.fillRect(0, 0, WIDTH, 22, 0x1082);
-  background.setTextDatum(TL_DATUM);
-  background.setTextColor(TFT_WHITE, 0x1082);
-  background.setFreeFont(FSS9);
-  background.drawString("Чернігівська обл.", 8, 4, GFXFF);
-  clock_data cd = getClockData(mElapsed);
-  background.setTextDatum(TR_DATUM);
-  background.drawString(cd.currentTime.c_str(), WIDTH - 8, 4, GFXFF);
+  // Top info bar — load Cyrillic font unconditionally: other screens call
+  // render.loadFont(DigitalNumbers) every frame which silently replaces it.
+  render.loadFont(NotoSansCyrillic, sizeof(NotoSansCyrillic));
 
-  if (!cyrillicLoaded) {
-    render.loadFont(NotoSansCyrillic, sizeof(NotoSansCyrillic));
-    cyrillicLoaded = true;
-  }
+  background.fillRect(0, 0, WIDTH, 22, 0x1082);
+  // Region label — use render so Cyrillic glyphs are available
+  render.setFontSize(11);
+  render.drawString("Чернігівська обл.", 8, 5, TFT_WHITE);
+  // Time — ASCII only, background sprite is fine
+  String alertTime = getTime();
+  background.setFreeFont(FSS9);
+  background.setTextColor(TFT_WHITE, 0x1082);
+  background.setTextDatum(TR_DATUM);
+  background.drawString(alertTime.c_str(), 312, 4, GFXFF);
 
   render.setFontSize(58);
   render.drawString(statusText, 20, 30, TFT_WHITE);
@@ -361,7 +355,118 @@ void tDisplay_AlertScreen(unsigned long mElapsed) {
   background.pushSprite(0, 0);
 }
 
-CyclicScreenFunction tDisplayCyclicScreens[] = {tDisplay_MinerScreen, tDisplay_AlertScreen, tDisplay_ClockScreen, tDisplay_GlobalHashScreen, tDisplay_BTCprice};
+// ===== CLAUDE USAGE SCREEN =====
+static unsigned long sClaudeFooterTime = 0;
+static int           sClaudeFooterIdx  = 0;
+static const char*   CLAUDE_FOOTER[]   = {"* Baking...", "* Divining...", "* Thinking...", "* Brewing..."};
+
+void tDisplay_ClaudeScreen(unsigned long mElapsed) {
+  (void)mElapsed;
+  background.fillSprite(TFT_BLACK);
+
+  // Header bar
+  background.fillRect(0, 0, WIDTH, 22, 0x1082);
+  background.setFreeFont(FSS9);
+  background.setTextColor(TFT_WHITE, 0x1082);
+  background.setTextDatum(TL_DATUM);
+  background.drawString("Claude Usage", 8, 4, GFXFF);
+  String claudeTime = getTime();
+  background.setTextDatum(TR_DATUM);
+  background.drawString(claudeTime.c_str(), 312, 4, GFXFF);
+
+  bool dataOk = gClaudeUsage.ok &&
+                (gClaudeUsage.last_updated > 0) &&
+                (millis() - gClaudeUsage.last_updated < 10UL * 60UL * 1000UL);
+
+  if (dataOk) {
+    char buf[32];
+
+    // ---- 5h / Current session ----
+    snprintf(buf, sizeof(buf), "%d%%", gClaudeUsage.session_pct);
+    background.setFreeFont(FSSB9);
+    background.setTextColor(TFT_WHITE, TFT_BLACK);
+    background.setTextDatum(TL_DATUM);
+    background.drawString(buf, 8, 27, GFXFF);
+    background.setTextDatum(TR_DATUM);
+    background.drawString("Current", 312, 27, GFXFF);
+
+    // Progress bar
+    int bx = 8, bw = WIDTH - 16, bh = 12, by = 48;
+    background.fillRect(bx, by, bw, bh, 0x2104);
+    uint32_t c5 = gClaudeUsage.session_pct > 80 ? TFT_RED :
+                  gClaudeUsage.session_pct > 50 ? TFT_ORANGE : TFT_GREEN;
+    int f5 = bw * gClaudeUsage.session_pct / 100;
+    if (f5 > 0) background.fillRect(bx, by, f5, bh, c5);
+
+    // Reset time
+    int rm = gClaudeUsage.session_reset_min;
+    if (rm > 60)
+      snprintf(buf, sizeof(buf), "Resets in %dh %dm", rm / 60, rm % 60);
+    else
+      snprintf(buf, sizeof(buf), "Resets in %dm", rm);
+    background.setFreeFont(FSS9);
+    background.setTextColor(0xC618, TFT_BLACK);
+    background.setTextDatum(TL_DATUM);
+    background.drawString(buf, 8, 66, GFXFF);
+
+    // Divider
+    background.drawLine(0, 84, WIDTH, 84, 0x4208);
+
+    // ---- Weekly ----
+    snprintf(buf, sizeof(buf), "%d%%", gClaudeUsage.weekly_pct);
+    background.setFreeFont(FSSB9);
+    background.setTextColor(TFT_WHITE, TFT_BLACK);
+    background.setTextDatum(TL_DATUM);
+    background.drawString(buf, 8, 90, GFXFF);
+    background.setTextDatum(TR_DATUM);
+    background.drawString("Weekly", 312, 90, GFXFF);
+
+    // Progress bar
+    int by2 = 111;
+    background.fillRect(bx, by2, bw, bh, 0x2104);
+    uint32_t cW = gClaudeUsage.weekly_pct > 80 ? TFT_RED :
+                  gClaudeUsage.weekly_pct > 50 ? TFT_ORANGE : TFT_GREEN;
+    int fW = bw * gClaudeUsage.weekly_pct / 100;
+    if (fW > 0) background.fillRect(bx, by2, fW, bh, cW);
+
+    // Reset time
+    int wr = gClaudeUsage.weekly_reset_min;
+    if (wr > 1440)
+      snprintf(buf, sizeof(buf), "Resets in %dd %dh", wr / 1440, (wr % 1440) / 60);
+    else if (wr > 60)
+      snprintf(buf, sizeof(buf), "Resets in %dh %dm", wr / 60, wr % 60);
+    else
+      snprintf(buf, sizeof(buf), "Resets in %dm", wr);
+    background.setFreeFont(FSS9);
+    background.setTextColor(0xC618, TFT_BLACK);
+    background.setTextDatum(TL_DATUM);
+    background.drawString(buf, 8, 129, GFXFF);
+
+  } else {
+    // No data — grey placeholders
+    background.setFreeFont(FSSB9);
+    background.setTextColor(0x8410, TFT_BLACK);
+    background.setTextDatum(MC_DATUM);
+    background.drawString("--%", WIDTH / 2, 58, GFXFF);
+    background.setFreeFont(FSS9);
+    background.drawString("No data - check API key", WIDTH / 2, 84, GFXFF);
+    background.drawString("--%", WIDTH / 2, 110, GFXFF);
+  }
+
+  // Footer — cycling text, orange, every 3 s
+  if (millis() - sClaudeFooterTime > 3000) {
+    sClaudeFooterTime = millis();
+    sClaudeFooterIdx  = (sClaudeFooterIdx + 1) % 4;
+  }
+  background.setFreeFont(FSS9);
+  background.setTextColor(TFT_ORANGE, TFT_BLACK);
+  background.setTextDatum(TL_DATUM);
+  background.drawString(CLAUDE_FOOTER[sClaudeFooterIdx], 8, 150, GFXFF);
+
+  background.pushSprite(0, 0);
+}
+
+CyclicScreenFunction tDisplayCyclicScreens[] = {tDisplay_MinerScreen, tDisplay_AlertScreen, tDisplay_ClaudeScreen};
 
 DisplayDriver tDisplayDriver = {
     tDisplay_Init,
